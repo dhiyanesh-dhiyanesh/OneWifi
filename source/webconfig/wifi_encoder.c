@@ -202,6 +202,13 @@ webconfig_error_t encode_radio_object(const rdk_wifi_radio_t *radio, cJSON *radi
     // ChannelWidth
     cJSON_AddNumberToObject(radio_object, "ChannelWidth", radio_info->channelWidth);
 
+    // EHT disabled 20 MHz subchannel bitmap from the applied radio state.
+    wifi_util_dbg_print(WIFI_WEBCONFIG,
+        "%s: encoding applied PuncturingBitmap=0x%04x\n",
+        __func__, radio_info->puncturingInfo.punct_bitmap);
+    cJSON_AddNumberToObject(radio_object, "PuncturingBitmap",
+        radio_info->puncturingInfo.punct_bitmap);
+
     // HwMode
     cJSON_AddNumberToObject(radio_object, "HwMode", radio_info->variant);
 

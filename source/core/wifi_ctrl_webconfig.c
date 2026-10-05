@@ -2506,6 +2506,11 @@ int webconfig_hal_radio_apply(wifi_ctrl_t *ctrl, webconfig_subdoc_decoded_data_t
 
             ret = wifi_hal_setRadioOperatingParameters(mgr_radio_data->vaps.radio_index, &radio_data->oper);
 
+            wifi_util_info_print(WIFI_WEBCONFIG,
+                "PUNCTURE_TRACE HAL request radio=%u width=%u bitmap=0x%04x ret=%d\n",
+                mgr_radio_data->vaps.radio_index, radio_data->oper.channelWidth,
+                radio_data->oper.puncturingInfo.punct_bitmap, ret);
+
             if (ret != RETURN_OK) {
                 wifi_util_error_print(WIFI_MGR, "%s:%d: failed to apply\n", __func__, __LINE__);
                 ctrl->webconfig_state |= ctrl_webconfig_state_radio_cfg_rsp_pending;

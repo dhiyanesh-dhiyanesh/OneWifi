@@ -44,6 +44,25 @@
 #include "const.h"
 #include "wifi_ctrl.h"
 #include "wifi_util.h"
+
+#ifndef EHT_PUNCTURE_AGENT_TEST
+#define EHT_PUNCTURE_AGENT_TEST 0
+#endif
+
+static unsigned short agent_ocr_test_bitmap(const wifi_radio_operationParam_t *oper)
+{
+#if EHT_PUNCTURE_AGENT_TEST
+    if (oper != NULL &&
+        (oper->channelWidth == WIFI_CHANNELBANDWIDTH_80MHZ ||
+         oper->channelWidth == WIFI_CHANNELBANDWIDTH_160MHZ ||
+         oper->channelWidth == WIFI_CHANNELBANDWIDTH_320MHZ)) {
+        return 0x0002;
+    }
+#else
+    (void)oper;
+#endif
+    return 0;
+}
 #include "schema.h"
 #include "schema_gen.h"
 #include "webconfig_external_proto.h"
@@ -561,6 +580,25 @@ webconfig_error_t translate_radio_object_to_easymesh_for_radio(webconfig_subdoc_
         }
         snprintf(em_radio_info->intf.name, sizeof(em_radio_info->intf.name), "%s", radio->name);
         mac_address_from_name(radio_iface_map->interface_name, em_radio_info->intf.mac);
+        {
+            unsigned short applied_bitmap = oper_param->puncturingInfo.punct_bitmap;
+#if EHT_PUNCTURE_AGENT_TEST
+            applied_bitmap = agent_ocr_test_bitmap(oper_param);
+#endif
+            bool applied_valid = applied_bitmap != 0;
+            if (em_radio_info->eht_puncture_effective.valid != applied_valid ||
+                em_radio_info->eht_puncture_effective.bitmap != applied_bitmap) {
+                em_radio_info->eht_puncture_effective.valid = applied_valid;
+                em_radio_info->eht_puncture_effective.bitmap = applied_bitmap;
+                em_radio_info->eht_puncture_effective.generation++;
+            }
+            wifi_util_dbg_print(WIFI_WEBCONFIG,
+                "%s: PUNCTURE_TRACE applied radio=%s bitmap=0x%04x -> effective(valid=%d bitmap=0x%04x generation=%u)\n",
+                __func__, radio->name, applied_bitmap,
+                em_radio_info->eht_puncture_effective.valid,
+                em_radio_info->eht_puncture_effective.bitmap,
+                em_radio_info->eht_puncture_effective.generation);
+        }
         no_of_opclass = proto->get_num_op_class(proto->data_model);
         radio_count ++;
         for (i = 0; i < oper_param->numOperatingClasses; i++) {
@@ -853,13 +891,17 @@ static void fill_eht_ops_from_radio(const wifi_radio_operationParam_t *oper,
     eht_ops_bss->ccfs0   = d_ccfs0;
     eht_ops_bss->ccfs1   = d_ccfs1;
 
-    /* --- Puncturing / disabled subchannel bitmap --- */
-    if (oper->puncturingInfo.punct_bitmap != 0) {
-        eht_ops_bss->disabled_subchannel_valid = 1;
-        eht_ops_bss->disabled_subchannel_bitmap[0] =
-            (unsigned char)(oper->puncturingInfo.punct_bitmap & 0xFF);
-        eht_ops_bss->disabled_subchannel_bitmap[1] =
-            (unsigned char)((oper->puncturingInfo.punct_bitmap >> 8) & 0xFF);
+    unsigned short applied_bitmap = oper->puncturingInfo.punct_bitmap;
+#if EHT_PUNCTURE_AGENT_TEST
+    applied_bitmap = agent_ocr_test_bitmap(oper);
+#endif
+    wifi_util_dbg_print(WIFI_WEBCONFIG, "%s: PUNCTURE_TRACE beacon applied punct_bitmap=0x%04x\n", __func__, applied_bitmap);
+    if (applied_bitmap != 0) {
+       eht_ops_bss->disabled_subchannel_valid = 1;
+       eht_ops_bss->disabled_subchannel_bitmap[0] =
+               (unsigned char)(applied_bitmap & 0xFF);
+       eht_ops_bss->disabled_subchannel_bitmap[1] =
+               (unsigned char)((applied_bitmap >> 8) & 0xFF);
     }
 
     wifi_util_dbg_print(WIFI_WEBCONFIG,
@@ -867,7 +909,7 @@ static void fill_eht_ops_from_radio(const wifi_radio_operationParam_t *oper,
         __func__, __LINE__,
         eht_ops_bss->op_info_valid, eht_ops_bss->control,
         eht_ops_bss->ccfs0, eht_ops_bss->ccfs1,
-        oper->puncturingInfo.punct_bitmap);
+        applied_bitmap);
 }
 
 /* Fill Channel Scan Capability op class list for one radio.
@@ -3507,6 +3549,33 @@ webconfig_error_t translate_radio_object_from_easymesh_to_radio(webconfig_subdoc
             return webconfig_error_translate_from_easymesh;
         }
         mac_address_from_name(radio_iface_map->interface_name, ruid);
+        em_radio_info_t *source_radio = NULL;
+        for (unsigned int radio_num = 0; radio_num < proto->get_num_radio(proto->data_model); radio_num++) {
+            em_radio_info_t *candidate = proto->get_radio_info(proto->data_model, radio_num);
+            if (candidate != NULL && memcmp(candidate->intf.mac, ruid,
+                sizeof(mac_address_t)) == 0) {
+                source_radio = candidate;
+                break;
+            }
+        }
+        if (source_radio == NULL) {
+            wifi_util_dbg_print(WIFI_WEBCONFIG,
+                "%s:%d: no source radio puncturing state for %s; using bitmap 0\n",
+                __func__, __LINE__, radio->name);
+            oper_param->puncturingInfo.punct_bitmap = 0;
+        } else {
+            const em_eht_puncture_state_t *desired =
+                &source_radio->eht_puncture_desired;
+            const em_eht_puncture_state_t *effective =
+                &source_radio->eht_puncture_effective;
+            oper_param->puncturingInfo.punct_bitmap = desired->valid ?
+                desired->bitmap : (effective->valid ? effective->bitmap : 0);
+            wifi_util_dbg_print(WIFI_WEBCONFIG,
+                "%s: dhiyanesh PUNCTURE_TRACE radio=%s desired(valid=%d bitmap=0x%04x) effective(valid=%d bitmap=0x%04x) -> radio config=0x%04x\n",
+                __func__, radio->name, desired->valid, desired->bitmap,
+                effective->valid, effective->bitmap,
+                oper_param->puncturingInfo.punct_bitmap);
+        }
         for (j = 0; j < num; j++) {
             em_op_class_info = proto->get_op_class_info(proto->data_model, j);
             if ((em_op_class_info != NULL) && (em_op_class_info->id.type == 1) &&

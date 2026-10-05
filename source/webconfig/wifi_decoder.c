@@ -3176,6 +3176,22 @@ webconfig_error_t decode_radio_object(const cJSON *obj_radio, rdk_wifi_radio_t *
         return webconfig_error_decode;
     }
 
+    // EHT disabled 20 MHz subchannel bitmap. Optional for older subdocuments.
+    param = cJSON_GetObjectItem(obj_radio, "PuncturingBitmap");
+    if (param != NULL && cJSON_IsNumber(param)) {
+        if (param->valuedouble < 0 || param->valuedouble > 0xffff ||
+            param->valuedouble != (double)(USHORT)param->valuedouble) {
+            wifi_util_error_print(WIFI_WEBCONFIG,
+                "Invalid PuncturingBitmap value %f\n", param->valuedouble);
+            return webconfig_error_decode;
+        }
+        radio_info->puncturingInfo.punct_bitmap =
+            (USHORT)param->valuedouble;
+        wifi_util_dbg_print(WIFI_WEBCONFIG,
+            "%s: decoded PuncturingBitmap=0x%04x\n",
+            __func__, radio_info->puncturingInfo.punct_bitmap);
+    }
+
     // HwMode
     decode_param_integer(obj_radio, "HwMode", param);
     if (validate_wifi_hw_variant(radio_info->band, param->valuedouble) != RETURN_OK) {
